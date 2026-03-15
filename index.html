@@ -133,7 +133,7 @@
                     <h3 class="font-bold text-slate-800 text-xs h-8 overflow-hidden">${p.name}</h3>
                     <p class="text-emerald-700 font-black my-3">${p.price} BD</p>
                     ${isOut ? 
-                        `<div class="w-full py-2 bg-slate-200 text-slate-500 rounded-xl text-[10px] font-black uppercase">Sold Out</div>` : 
+                        `<div class="w-full py-2 bg-slate-200 text-slate-500 rounded-xl text-[10px] font-black uppercase">Out of Stock</div>` : 
                         `<button onclick="addToCart('${p.id}')" class="m3-btn-green w-full py-2 text-xs">Add to Bag</button>`
                     }
                 </div>`;
