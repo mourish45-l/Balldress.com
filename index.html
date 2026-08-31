@@ -7,9 +7,17 @@
     <script src="https://cdn.tailwindcss.com">
     </script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
+    <!-- Firebase SDK (compat) -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js">
+    </script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js">
+    </script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js">
+    </script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js">
+    </script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
-
         * {
             font-family: 'Plus Jakarta Sans', sans-serif;
         }
@@ -32,6 +40,10 @@
         }
         .m3-btn-green:hover {
             background-color: #15803d;
+        }
+        .m3-btn-green:disabled {
+            opacity: 0.5;
+            pointer-events: none;
         }
         .nav-glass {
             background: rgba(255, 255, 255, 0.85);
@@ -59,38 +71,89 @@
             opacity: 0.5;
             pointer-events: none;
         }
-        .order-item-pill {
-            background: #f8fafc;
-            border-radius: 40px;
-            padding: 4px 12px 4px 8px;
-            display: inline-flex;
+        .stock-badge {
+            font-size: 10px;
+            background: #e2e8f0;
+            padding: 2px 10px;
+            border-radius: 20px;
+            color: #1e293b;
+            font-weight: 600;
+        }
+        .wishlist-heart {
+            transition: 0.2s;
+            cursor: pointer;
+        }
+        .wishlist-heart:hover {
+            transform: scale(1.2);
+        }
+        .order-timeline {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .timeline-step {
+            display: flex;
             align-items: center;
             gap: 6px;
-            font-size: 11px;
-            font-weight: 600;
-            color: #1e293b;
-            border: 1px solid #e2e8f0;
-        }
-        .order-item-pill i {
             font-size: 12px;
+            font-weight: 600;
+            color: #94a3b8;
+        }
+        .timeline-step.active {
             color: #16a34a;
         }
-        .product-chip {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            background: #f1f5f9;
-            padding: 2px 10px 2px 6px;
-            border-radius: 20px;
-            font-size: 11px;
-            font-weight: 600;
+        .timeline-step.done {
+            color: #16a34a;
+        }
+        .timeline-line {
+            width: 30px;
+            height: 2px;
+            background: #cbd5e1;
+        }
+        .timeline-line.done {
+            background: #16a34a;
+        }
+        .star-rating {
+            color: #fbbf24;
+            font-size: 14px;
+        }
+        .review-item {
+            background: #f8fafc;
+            border-radius: 12px;
+            padding: 8px 12px;
+            border: 1px solid #e2e8f0;
+            margin-bottom: 6px;
+        }
+        .review-item .stars {
+            color: #fbbf24;
+            font-size: 12px;
+        }
+        .address-field {
+            width: 100%;
+            padding: 10px 14px;
+            border-radius: 16px;
+            border: 1px solid #d1d5db;
+            background: #f9fafb;
+            font-size: 14px;
+        }
+        .address-field:focus {
+            outline: 2px solid #16a34a;
+            border-color: transparent;
         }
     </style>
+    <script>
+        // Register service worker for FCM
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/firebase-messaging-sw.js')
+                .then(reg => console.log('SW registered:', reg))
+                .catch(err => console.error('SW registration failed:', err));
+        }
+    </script>
 </head>
 <body class="pb-24">
 
     <div id="status-msg"></div>
-
     <div id="loader" class="fixed inset-0 bg-white z-[100] flex flex-col items-center justify-center">
         <div class="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
         <p class="mt-4 text-emerald-600 font-bold">Connecting to Cloud...</p>
@@ -120,11 +183,8 @@
         <button id="admin-icon" onclick="showView('admin')" class="nav-icon p-3 hidden text-emerald-400" data-v="admin"><i class="fa-solid fa-shield-halved"></i></button>
     </div>
 
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-        import { getDatabase, ref, set, push, onValue, update } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
-
+    <script>
+        // Firebase config (compat)
         const firebaseConfig = {
             apiKey: "AIzaSyAp0BeH1zgsKRGI4itBpur919WX0FIg-uo",
             authDomain: "whupm-13cab.firebaseapp.com",
@@ -135,14 +195,15 @@
             appId: "1:178241688205:web:d6e36734d4dac1440a08c4"
         };
 
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getDatabase(app);
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.database();
+        const messaging = firebase.messaging();
 
         const ADMIN_EMAIL = "mourishnithin@outlook.com";
         const ADMIN_PASS_SECRET = "230914";
 
-        const PRODUCTS = [
+        const DEFAULT_PRODUCTS = [
             { id: 'p1', name: 'Parker Beta Standard', price: 250, icon: 'fa-pen-clip' },
             { id: 'p2', name: 'Figo panda liquid roller (Blue)', price: 70, icon: 'fa-pen-fancy' },
             { id: 'p3-blue', name: 'Pilot V7 (Blue)', price: 60, icon: 'fa-pen-nib' },
@@ -151,84 +212,396 @@
             { id: 'p4-black', name: 'Reynold 045 (Black)', price: 5, icon: 'fa-pencil' }
         ];
 
-        let cart = [];
+        // ----- State -----
+        let productList = [...DEFAULT_PRODUCTS];
         let stockData = {};
+        let wishlist = {}; // productId: true
+        let ratings = {}; // productId: { average, count, reviews: [{uid, name, rating, comment, date}] }
+        let cart = [];
         let currentActiveView = 'home';
-        let ordersListener = null; // track listener to avoid duplicates
+        let ordersListener = null;
+        let currentUser = null;
+        let userAddress = null; // stored in users/{uid}/address
 
-        // --- GLOBAL REAL-TIME STOCK LISTENER ---
-        onValue(ref(db, 'stock'), (snapshot) => {
-            stockData = snapshot.val() || {};
-            console.log("Syncing stock from cloud...", stockData);
-            if (currentActiveView === 'home') renderHome();
-            if (currentActiveView === 'admin') renderAdmin();
-        });
-
-        window.showMessage = (text, type = 'info') => {
+        // ----- UI Helpers -----
+        function showMessage(text, type = 'info') {
             const el = document.getElementById('status-msg');
             el.innerText = text;
             el.style.display = 'block';
             el.className = type === 'error' ? 'bg-red-600 text-white shadow-xl' : 'bg-slate-800 text-white shadow-xl';
-            setTimeout(() => { el.style.display = 'none'; }, 2000);
-        };
+            clearTimeout(el._timeout);
+            el._timeout = setTimeout(() => { el.style.display = 'none'; }, 2500);
+        }
 
-        window.showView = (v) => {
-            currentActiveView = v;
+        function showView(view) {
+            currentActiveView = view;
             document.querySelectorAll('.nav-icon').forEach(i => {
-                i.classList.toggle('active', i.dataset.v === v);
+                i.classList.toggle('active', i.dataset.v === view);
             });
-            if (v === 'home') renderHome();
-            else if (v === 'login') renderAuth('login');
-            else if (v === 'signup') renderAuth('signup');
-            else if (v === 'cart') renderCart();
-            else if (v === 'orders') renderOrders();
-            else if (v === 'admin') renderAdmin();
+            if (view === 'home') renderHome();
+            else if (view === 'login') renderAuth('login');
+            else if (view === 'signup') renderAuth('signup');
+            else if (view === 'cart') renderCart();
+            else if (view === 'orders') renderOrders();
+            else if (view === 'admin') renderAdmin();
+            else if (view === 'product') renderProductDetail(); // special
+        }
+
+        // ----- Real‑time listeners -----
+        db.ref('prices').on('value', snap => {
+            const priceData = snap.val() || {};
+            productList = DEFAULT_PRODUCTS.map(p => ({
+                ...p,
+                price: priceData[p.id] !== undefined ? Number(priceData[p.id]) : p.price
+            }));
+            if (currentActiveView === 'home') renderHome();
+            if (currentActiveView === 'admin') renderAdmin();
+        });
+
+        db.ref('stock').on('value', snap => {
+            stockData = snap.val() || {};
+            if (currentActiveView === 'home') renderHome();
+            if (currentActiveView === 'admin') renderAdmin();
+        });
+
+        // Wishlist listener (per user)
+        function listenWishlist(uid) {
+            db.ref(`users/${uid}/wishlist`).on('value', snap => {
+                wishlist = snap.val() || {};
+                if (currentActiveView === 'home') renderHome();
+                // also update product detail if open
+            });
+        }
+
+        // Ratings listener
+        db.ref('ratings').on('value', snap => {
+            ratings = snap.val() || {};
+            if (currentActiveView === 'home') renderHome();
+        });
+
+        // ----- Auth state -----
+        auth.onAuthStateChanged(async user => {
+            document.getElementById('loader').style.display = 'none';
+            const bottom = document.getElementById('bottom-bar');
+            bottom.classList.toggle('hidden', !user);
+            const nav = document.getElementById('nav-actions');
+
+            if (user) {
+                currentUser = user;
+                // Load user address
+                db.ref(`users/${user.uid}/address`).once('value', snap => {
+                    userAddress = snap.val() || null;
+                });
+                // Load wishlist
+                listenWishlist(user.uid);
+
+                // FCM token
+                try {
+                    const permission = await Notification.requestPermission();
+                    if (permission === 'granted') {
+                        const token = await messaging.getToken({
+                            vapidKey: 'YOUR_VAPID_PUBLIC_KEY_HERE' // Replace with your VAPID key
+                        });
+                        if (token) {
+                            await db.ref(`users/${user.uid}/fcmToken`).set(token);
+                            console.log('FCM token saved');
+                        }
+                    }
+                } catch (err) { console.error('FCM:', err); }
+
+                // Foreground messages
+                messaging.onMessage(payload => {
+                    showMessage(payload.data?.body || payload.notification?.body || 'New update');
+                });
+
+                // Check email verification
+                if (!user.emailVerified) {
+                    showMessage('Please verify your email. Check your inbox.', 'info');
+                }
+
+                nav.innerHTML = `
+                    <button id="logout-btn" class="w-10 h-10 rounded-full bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 transition">
+                        <i class="fa-solid fa-power-off"></i>
+                    </button>`;
+                document.getElementById('logout-btn').onclick = () => auth.signOut();
+
+                document.getElementById('admin-icon').classList.toggle('hidden', user.email !== ADMIN_EMAIL);
+
+                if (ordersListener) {
+                    ordersListener();
+                    ordersListener = null;
+                }
+
+                if (user.email === ADMIN_EMAIL) {
+                    showView('admin');
+                } else {
+                    showView('home');
+                }
+            } else {
+                currentUser = null;
+                nav.innerHTML = `<button onclick="showView('login')" class="m3-btn-green px-6 py-2 text-sm">Login</button>`;
+                showView('home');
+                // Remove listeners
+                if (ordersListener) ordersListener();
+            }
+        });
+
+        // ----- Helper: Add to cart with quantity from product card -----
+        window.addToCartWithQty = (id, qtyInputId) => {
+            const qtyInput = document.getElementById(qtyInputId);
+            let qty = parseInt(qtyInput.value) || 1;
+            if (qty < 1) qty = 1;
+            const p = productList.find(x => x.id === id);
+            if (!p) { showMessage('Product not found', 'error'); return; }
+            const available = stockData[id] || 0;
+            if (available < qty) { showMessage('Not enough stock', 'error'); return; }
+            const ex = cart.find(x => x.id === id);
+            if (ex) {
+                const newQty = ex.qty + qty;
+                if (newQty > available) { showMessage('Not enough stock', 'error'); return; }
+                ex.qty = newQty;
+            } else {
+                cart.push({ ...p, qty });
+            }
+            updateCartUI();
+            showMessage(`${qty} × ${p.name} added`);
         };
 
-        // --- STOCK TOGGLE ---
-        window.toggleStock = (productId, targetValue) => {
-            set(ref(db, `stock/${productId}`), targetValue)
-                .then(() => showMessage("Inventory Updated"))
-                .catch(err => showMessage("Error: " + err.message, "error"));
+        // ----- Wishlist toggle -----
+        window.toggleWishlist = (id) => {
+            if (!currentUser) { showView('login'); return; }
+            const newVal = !wishlist[id];
+            db.ref(`users/${currentUser.uid}/wishlist/${id}`).set(newVal ? true : null);
         };
 
-        // --- RENDER HOME ---
+        // ----- Rating/review -----
+        window.submitRating = (productId) => {
+            if (!currentUser) { showView('login'); return; }
+            const stars = parseInt(document.getElementById(`rating-stars-${productId}`).value);
+            const comment = document.getElementById(`rating-comment-${productId}`).value.trim();
+            if (!stars || stars < 1 || stars > 5) { showMessage('Select 1-5 stars', 'error'); return; }
+            const review = {
+                uid: currentUser.uid,
+                name: currentUser.displayName || currentUser.email || 'Anonymous',
+                rating: stars,
+                comment: comment || '',
+                date: new Date().toISOString()
+            };
+            const ref = db.ref(`ratings/${productId}/reviews`).push();
+            ref.set(review).then(() => {
+                showMessage('Review added!');
+                document.getElementById(`rating-comment-${productId}`).value = '';
+                // Update average count (will be recalculated on listener)
+            });
+        };
+
+        // ----- Order cancellation -----
+        window.cancelOrder = (orderId) => {
+            if (!confirm('Cancel this order?')) return;
+            db.ref(`orders/${orderId}`).update({ status: 'Cancelled' })
+                .then(() => showMessage('Order cancelled'));
+        };
+
+        // ----- Checkout with address -----
+        window.checkout = async () => {
+            if (!currentUser) { showView('login'); return; }
+            if (!currentUser.emailVerified) {
+                showMessage('Please verify your email first.', 'error');
+                return;
+            }
+            if (cart.length === 0) { showMessage('Cart is empty', 'error'); return; }
+
+            // Collect address
+            const addressLine = document.getElementById('address-line')?.value.trim();
+            const city = document.getElementById('address-city')?.value.trim();
+            const postal = document.getElementById('address-postal')?.value.trim();
+            if (!addressLine || !city || !postal) {
+                showMessage('Please fill in all address fields', 'error');
+                return;
+            }
+            const address = { addressLine, city, postal };
+            // Save address for future
+            await db.ref(`users/${currentUser.uid}/address`).set(address);
+
+            // Check stock again
+            for (let item of cart) {
+                const available = stockData[item.id] || 0;
+                if (item.qty > available) {
+                    showMessage(`Not enough stock for ${item.name}`, 'error');
+                    return;
+                }
+            }
+
+            const total = cart.reduce((s, i) => s + (i.price * i.qty), 0);
+            const orderData = {
+                userId: currentUser.uid,
+                userEmail: currentUser.email,
+                items: cart.map(i => ({ ...i })),
+                total: total,
+                status: 'Processing',
+                date: new Date().toISOString(),
+                address: address
+            };
+            await db.ref('orders').push(orderData);
+            cart = [];
+            updateCartUI();
+            showView('orders');
+            showMessage('Order placed! 🎉');
+        };
+
+        // ----- Render functions -----
+
         function renderHome() {
-            let html = `<div class="mb-6 p-6 bg-emerald-100 rounded-[32px] border border-emerald-200">
-                <h2 class="text-2xl font-black text-emerald-900">Premium Pens</h2>
-                <p class="text-emerald-700 font-medium text-sm">Real-time inventory active.</p>
-            </div><div class="grid grid-cols-2 gap-4">`;
+            const searchTerm = document.getElementById('search-input')?.value?.toLowerCase() || '';
+            let filtered = productList.filter(p => p.name.toLowerCase().includes(searchTerm));
 
-            PRODUCTS.forEach(p => {
-                const isOut = stockData[p.id] === true;
+            let html = `
+                <div class="mb-6 p-6 bg-emerald-100 rounded-[32px] border border-emerald-200">
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <h2 class="text-2xl font-black text-emerald-900">Premium Pens</h2>
+                            <p class="text-emerald-700 font-medium text-sm">Real‑time inventory & prices.</p>
+                        </div>
+                        <div class="flex items-center gap-2 bg-white rounded-full px-4 py-2 shadow">
+                            <i class="fa-solid fa-search text-slate-400"></i>
+                            <input id="search-input" placeholder="Search pens..." class="outline-none bg-transparent text-sm w-32 sm:w-48" oninput="renderHome()" />
+                        </div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">`;
+
+            filtered.forEach(p => {
+                const stockQty = stockData[p.id] ?? 0;
+                const isOut = stockQty <= 0;
+                const inWishlist = wishlist[p.id] === true;
+                const avgRating = ratings[p.id]?.average || 0;
+                const ratingCount = ratings[p.id]?.count || 0;
+
                 html += `
-                    <div class="m3-card p-5 flex flex-col items-center text-center ${isOut ? 'out-of-stock' : ''}">
-                        <div class="w-14 h-14 bg-emerald-50 rounded-2xl flex items-center justify-center text-xl text-emerald-600 mb-3">
+                    <div class="m3-card p-4 flex flex-col items-center text-center ${isOut ? 'out-of-stock' : ''}">
+                        <div class="flex justify-between w-full mb-1">
+                            <span class="text-xs text-slate-400">${stockQty} left</span>
+                            <span class="wishlist-heart ${inWishlist ? 'text-red-500' : 'text-slate-300'}" onclick="toggleWishlist('${p.id}')">
+                                <i class="fa-solid fa-heart"></i>
+                            </span>
+                        </div>
+                        <div class="w-14 h-14 bg-emerald-50 rounded-2xl flex items-center justify-center text-xl text-emerald-600 mb-2">
                             <i class="fa-solid ${p.icon}"></i>
                         </div>
                         <h3 class="font-bold text-slate-800 text-xs h-8 overflow-hidden">${p.name}</h3>
-                        <p class="text-emerald-700 font-black my-3">${p.price} BD</p>
+                        <div class="flex items-center gap-1 text-xs">
+                            <span class="star-rating">${'★'.repeat(Math.round(avgRating))}${'☆'.repeat(5-Math.round(avgRating))}</span>
+                            <span class="text-slate-400">(${ratingCount})</span>
+                        </div>
+                        <p class="text-emerald-700 font-black my-1">${p.price} BD</p>
                         ${isOut ?
                             `<div class="w-full py-2 bg-slate-200 text-slate-500 rounded-xl text-[10px] font-black uppercase">Out of Stock</div>` :
-                            `<button onclick="addToCart('${p.id}')" class="m3-btn-green w-full py-2 text-xs">Add to Bag</button>`
+                            `
+                            <div class="flex items-center gap-2 my-1">
+                                <button onclick="document.getElementById('qty-${p.id}').stepDown();" class="w-6 h-6 bg-slate-100 rounded-full">−</button>
+                                <input id="qty-${p.id}" type="number" value="1" min="1" max="${stockQty}" class="w-10 text-center border-none bg-transparent font-bold text-sm" />
+                                <button onclick="document.getElementById('qty-${p.id}').stepUp();" class="w-6 h-6 bg-slate-100 rounded-full">+</button>
+                            </div>
+                            <button onclick="addToCartWithQty('${p.id}', 'qty-${p.id}')" class="m3-btn-green w-full py-1.5 text-xs">Add to Bag</button>
+                            `
                         }
+                        <button onclick="showProductDetail('${p.id}')" class="text-[10px] text-emerald-600 mt-1 underline">Details & Reviews</button>
                     </div>`;
             });
             document.getElementById('main-content').innerHTML = html + `</div>`;
         }
 
-        // --- RENDER ADMIN (with product details in orders) ---
+        // Product detail view (with reviews and rating)
+        window.showProductDetail = (productId) => {
+            currentActiveView = 'product';
+            const p = productList.find(x => x.id === productId);
+            if (!p) return;
+            const stockQty = stockData[p.id] ?? 0;
+            const reviews = ratings[p.id]?.reviews || {};
+            const avg = ratings[p.id]?.average || 0;
+            const count = ratings[p.id]?.count || 0;
+
+            let html = `
+                <div class="bg-white p-6 rounded-[32px] border border-emerald-100 mb-4">
+                    <div class="flex items-center gap-4 mb-4">
+                        <button onclick="showView('home')" class="text-slate-400"><i class="fa-solid fa-arrow-left"></i></button>
+                        <h2 class="text-xl font-black">${p.name}</h2>
+                    </div>
+                    <div class="flex flex-col items-center">
+                        <div class="w-20 h-20 bg-emerald-50 rounded-3xl flex items-center justify-center text-3xl text-emerald-600">
+                            <i class="fa-solid ${p.icon}"></i>
+                        </div>
+                        <p class="text-2xl font-black text-emerald-700 my-2">${p.price} BD</p>
+                        <p class="text-sm text-slate-500">${stockQty} in stock</p>
+                        <div class="flex items-center gap-1 my-2">
+                            <span class="star-rating text-xl">${'★'.repeat(Math.round(avg))}${'☆'.repeat(5-Math.round(avg))}</span>
+                            <span class="text-sm text-slate-400">(${count} reviews)</span>
+                        </div>
+                        ${stockQty > 0 ? `
+                            <div class="flex items-center gap-3 my-3">
+                                <button onclick="document.getElementById('qty-detail').stepDown();" class="w-8 h-8 bg-slate-100 rounded-full">−</button>
+                                <input id="qty-detail" type="number" value="1" min="1" max="${stockQty}" class="w-12 text-center border-none bg-transparent font-bold text-lg" />
+                                <button onclick="document.getElementById('qty-detail').stepUp();" class="w-8 h-8 bg-slate-100 rounded-full">+</button>
+                            </div>
+                            <button onclick="addToCartWithQty('${p.id}', 'qty-detail')" class="m3-btn-green px-8 py-2 text-sm">Add to Bag</button>
+                        ` : `<div class="text-red-500 font-bold">Out of stock</div>`}
+                    </div>
+                </div>
+
+                <!-- Reviews -->
+                <div class="bg-white p-6 rounded-[32px] border border-emerald-100">
+                    <h3 class="font-bold mb-4">Reviews</h3>
+                    ${Object.values(reviews).slice(0, 5).map(r => `
+                        <div class="review-item">
+                            <div class="flex items-center gap-2">
+                                <span class="font-bold text-sm">${r.name}</span>
+                                <span class="stars">${'★'.repeat(r.rating)}${'☆'.repeat(5-r.rating)}</span>
+                                <span class="text-[10px] text-slate-400">${new Date(r.date).toLocaleDateString()}</span>
+                            </div>
+                            <p class="text-sm text-slate-600">${r.comment || 'No comment'}</p>
+                        </div>
+                    `).join('') || '<p class="text-slate-400 text-sm">No reviews yet. Be the first!</p>'}
+
+                    <!-- Add review -->
+                    ${currentUser ? `
+                        <div class="mt-4 border-t pt-4">
+                            <p class="font-semibold text-sm">Write a review</p>
+                            <div class="flex items-center gap-2 my-2">
+                                <label>Rating: </label>
+                                <select id="rating-stars-${p.id}" class="border rounded-lg p-1 text-sm">
+                                    ${[1,2,3,4,5].map(s => `<option value="${s}">${s} ★</option>`).join('')}
+                                </select>
+                            </div>
+                            <input id="rating-comment-${p.id}" placeholder="Your comment (optional)" class="w-full border rounded-xl p-2 text-sm mb-2" />
+                            <button onclick="submitRating('${p.id}')" class="m3-btn-green px-4 py-1 text-sm">Submit</button>
+                        </div>
+                    ` : `<p class="text-sm text-slate-400 mt-2">Login to leave a review.</p>`}
+                </div>
+            `;
+            document.getElementById('main-content').innerHTML = html;
+        };
+
+        // ----- Admin -----
         function renderAdmin() {
             let html = `<h2 class="text-xl font-black mb-6">Inventory Control</h2>
             <div class="bg-white p-6 rounded-[32px] border border-emerald-100 mb-6">
-                <div class="space-y-3">
-                    ${PRODUCTS.map(p => {
-                        const isOut = stockData[p.id] === true;
+                <div class="space-y-4">
+                    ${productList.map(p => {
+                        const stockQty = stockData[p.id] ?? 0;
+                        const isOut = stockQty <= 0;
                         return `
-                            <div class="flex items-center justify-between p-4 bg-slate-50 rounded-2xl">
-                                <span class="text-xs font-bold text-slate-700">${p.name}</span>
-                                <button onclick="toggleStock('${p.id}', ${!isOut})" class="px-4 py-2 rounded-xl text-[10px] font-black transition-colors ${isOut ? 'bg-red-500 text-white' : 'bg-emerald-100 text-emerald-700'}">
-                                    ${isOut ? 'MARK AS IN STOCK' : 'MARK AS OUT'}
+                            <div class="flex flex-wrap items-center gap-3 p-4 bg-slate-50 rounded-2xl">
+                                <div class="flex-1 min-w-[120px]">
+                                    <span class="text-xs font-bold text-slate-700">${p.name}</span>
+                                    <span class="ml-2 text-[10px] text-slate-400">(${stockQty} left)</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-sm font-bold text-emerald-600">${p.price} BD</span>
+                                    <input type="number" id="price-input-${p.id}" value="${p.price}" class="w-20 p-1 rounded-xl border text-center" step="0.01" min="0" />
+                                    <button onclick="updatePrice('${p.id}', document.getElementById('price-input-${p.id}').value)" class="px-3 py-1.5 bg-emerald-100 text-emerald-700 rounded-xl text-[10px] font-black hover:bg-emerald-200 transition">Save</button>
+                                </div>
+                                <button onclick="toggleStock('${p.id}', ${isOut})" class="px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors ${isOut ? 'bg-red-500 text-white' : 'bg-emerald-100 text-emerald-700'}">
+                                    ${isOut ? 'Mark In Stock' : 'Mark Out of Stock'}
                                 </button>
                             </div>`;
                     }).join('')}
@@ -238,28 +611,23 @@
 
             document.getElementById('main-content').innerHTML = html;
 
-            // Remove old listener if any
             if (ordersListener) {
                 ordersListener();
                 ordersListener = null;
             }
 
-            // Attach fresh listener for admin orders
-            const ordersRef = ref(db, 'orders');
-            ordersListener = onValue(ordersRef, (snap) => {
+            ordersListener = db.ref('orders').on('value', snap => {
                 let oHtml = `<h3 class="font-bold px-2 mb-4 flex items-center gap-2">
                     <i class="fa-solid fa-receipt text-emerald-600"></i> All Customer Orders
-                    <span class="text-xs text-slate-400 font-normal ml-2">(${snap.size})</span>
+                    <span class="text-xs text-slate-400 font-normal ml-2">(${snap.numChildren()})</span>
                 </h3>`;
-
-                if (snap.size === 0) {
-                    oHtml += `<div class="bg-white p-8 rounded-3xl text-center text-slate-400 border border-emerald-50">No orders yet.</div>`;
+                if (!snap.exists()) {
+                    oHtml += `<div class="bg-white p-8 rounded-3xl text-center text-slate-400">No orders yet.</div>`;
                 } else {
                     snap.forEach(c => {
                         const o = c.val();
                         const items = o.items || [];
                         const total = o.total || items.reduce((s, i) => s + (i.price * i.qty), 0);
-
                         oHtml += `
                             <div class="bg-white p-5 rounded-3xl border border-emerald-50 mb-4 shadow-sm">
                                 <div class="flex flex-wrap items-start justify-between gap-2 mb-3">
@@ -272,23 +640,19 @@
                                         <span class="px-2 py-1 rounded-lg text-[10px] font-bold ${o.status === 'Delivered' ? 'bg-emerald-100 text-emerald-700' : o.status === 'Shipped' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}">${o.status || 'Processing'}</span>
                                     </div>
                                 </div>
-
-                                <!-- Product list -->
                                 <div class="flex flex-wrap gap-1.5 mt-2 mb-3">
-                                    ${items.length > 0 ? items.map(item => `
-                                        <span class="order-item-pill">
-                                            <i class="fa-solid ${item.icon || 'fa-pen'}"></i>
-                                            ${item.name} <span class="text-emerald-600 font-black">×${item.qty}</span>
-                                            <span class="text-slate-400 text-[10px]">(${item.price * item.qty} BD)</span>
+                                    ${items.map(item => `
+                                        <span class="bg-slate-100 rounded-full px-2 py-0.5 text-[10px] font-semibold">
+                                            ${item.name} ×${item.qty}
                                         </span>
-                                    `).join('') : `<span class="text-xs text-slate-400 italic">No items listed</span>`}
+                                    `).join('')}
                                 </div>
-
                                 <div class="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-slate-100">
-                                    <select onchange="updateStatus('${c.key}', this.value)" class="flex-1 min-w-[120px] bg-slate-50 p-2.5 rounded-xl text-xs font-bold border-none focus:ring-2 focus:ring-emerald-300 outline-none">
+                                    <select onchange="updateOrderStatus('${c.key}', this.value)" class="flex-1 min-w-[120px] bg-slate-50 p-2.5 rounded-xl text-xs font-bold border-none focus:ring-2 focus:ring-emerald-300 outline-none">
                                         <option value="Processing" ${o.status === 'Processing' ? 'selected' : ''}>Processing</option>
                                         <option value="Shipped" ${o.status === 'Shipped' ? 'selected' : ''}>Shipped</option>
                                         <option value="Delivered" ${o.status === 'Delivered' ? 'selected' : ''}>Delivered</option>
+                                        <option value="Cancelled" ${o.status === 'Cancelled' ? 'selected' : ''}>Cancelled</option>
                                     </select>
                                     <button onclick="deleteOrder('${c.key}')" class="px-4 py-2.5 bg-red-50 text-red-400 rounded-xl hover:bg-red-100 transition"><i class="fa-solid fa-trash-can"></i></button>
                                 </div>
@@ -299,34 +663,26 @@
             });
         }
 
-        // --- CART ---
-        window.addToCart = (id) => {
-            const p = PRODUCTS.find(x => x.id === id);
-            if (!p) return;
-            const ex = cart.find(x => x.id === id);
-            if (ex) ex.qty++;
-            else cart.push({ ...p, qty: 1 });
-            updateUI();
-            showMessage("Added to bag");
+        window.toggleStock = (id, setIn) => {
+            const newQty = setIn ? 10 : 0;
+            db.ref(`stock/${id}`).set(newQty);
         };
 
-        window.changeQty = (id, d) => {
-            const item = cart.find(x => x.id === id);
-            if (item) {
-                item.qty += d;
-                if (item.qty <= 0) cart = cart.filter(x => x.id !== id);
-            }
-            updateUI();
-            renderCart();
+        window.updatePrice = (id, val) => {
+            const num = parseFloat(val);
+            if (isNaN(num) || num < 0) { showMessage('Invalid price', 'error'); return; }
+            db.ref(`prices/${id}`).set(num);
         };
 
-        function updateUI() {
-            const count = cart.reduce((s, i) => s + i.qty, 0);
-            const c = document.getElementById('cart-count');
-            c.innerText = count;
-            c.classList.toggle('hidden', count === 0);
-        }
+        window.updateOrderStatus = (id, status) => {
+            db.ref(`orders/${id}/status`).set(status);
+        };
 
+        window.deleteOrder = (id) => {
+            if (confirm('Delete this order?')) db.ref(`orders/${id}`).remove();
+        };
+
+        // ----- Cart -----
         function renderCart() {
             let total = cart.reduce((s, i) => s + (i.price * i.qty), 0);
             let html = `<h2 class="text-xl font-black mb-6">Your Bag</h2>`;
@@ -352,6 +708,21 @@
                             </div>
                         </div>`;
                 });
+
+                // Address collection
+                html += `
+                    <div class="bg-white p-5 rounded-3xl border border-emerald-100 mt-4">
+                        <h3 class="font-bold mb-3">Shipping Address</h3>
+                        <div class="space-y-3">
+                            <input id="address-line" placeholder="Street address" class="address-field" value="${userAddress?.addressLine || ''}" />
+                            <div class="flex gap-3">
+                                <input id="address-city" placeholder="City" class="address-field" value="${userAddress?.city || ''}" />
+                                <input id="address-postal" placeholder="Postal code" class="address-field" value="${userAddress?.postal || ''}" />
+                            </div>
+                        </div>
+                    </div>
+                `;
+
                 html += `
                     <button onclick="checkout()" class="w-full bg-emerald-600 text-white py-4 rounded-2xl font-black mt-4 shadow-lg">
                         ${total} BD — Place Order
@@ -360,96 +731,108 @@
             document.getElementById('main-content').innerHTML = html;
         }
 
-        window.checkout = async () => {
-            if (!auth.currentUser) return showView('login');
-            if (cart.length === 0) return showMessage("Cart is empty!", "error");
-
-            const total = cart.reduce((s, i) => s + (i.price * i.qty), 0);
-            await push(ref(db, 'orders'), {
-                userId: auth.currentUser.uid,
-                userEmail: auth.currentUser.email,
-                items: cart.map(i => ({ ...i })), // deep copy
-                total: total,
-                status: 'Processing',
-                date: new Date().toISOString()
-            });
-            cart = [];
-            updateUI();
-            showView('orders');
-            showMessage("Order Placed! 🎉");
+        window.changeQty = (id, delta) => {
+            const item = cart.find(x => x.id === id);
+            if (item) {
+                item.qty += delta;
+                if (item.qty <= 0) cart = cart.filter(x => x.id !== id);
+            }
+            updateCartUI();
+            renderCart();
         };
 
-        window.updateStatus = (id, s) => update(ref(db, `orders/${id}`), { status: s });
-        window.deleteOrder = (id) => {
-            if (confirm("Delete this order?")) set(ref(db, `orders/${id}`), null);
-        };
+        function updateCartUI() {
+            const count = cart.reduce((s, i) => s + i.qty, 0);
+            const c = document.getElementById('cart-count');
+            c.innerText = count;
+            c.classList.toggle('hidden', count === 0);
+        }
 
-        // --- RENDER USER ORDERS (with product details) ---
+        // ----- Orders (user) with timeline and cancel -----
         function renderOrders() {
             document.getElementById('main-content').innerHTML = `
                 <h2 class="text-xl font-black mb-6">Your Orders</h2>
                 <div id="user-orders" class="space-y-3"></div>
             `;
 
-            // Remove old listener if any
             if (ordersListener) {
                 ordersListener();
                 ordersListener = null;
             }
 
-            const ordersRef = ref(db, 'orders');
-            ordersListener = onValue(ordersRef, (snap) => {
+            ordersListener = db.ref('orders').on('value', snap => {
                 const container = document.getElementById('user-orders');
                 if (!container) return;
-
                 let html = '';
                 let found = false;
 
                 snap.forEach(c => {
                     const o = c.val();
-                    if (auth.currentUser && o.userId === auth.currentUser.uid) {
+                    if (currentUser && o.userId === currentUser.uid) {
                         found = true;
                         const items = o.items || [];
                         const total = o.total || items.reduce((s, i) => s + (i.price * i.qty), 0);
+                        const status = o.status || 'Processing';
+                        const steps = ['Processing', 'Shipped', 'Delivered'];
+                        const currentStep = steps.indexOf(status);
+                        const isCancelled = status === 'Cancelled';
 
                         html += `
                             <div class="bg-white p-5 rounded-3xl border border-emerald-50 shadow-sm">
                                 <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
                                     <span class="text-[10px] font-black text-slate-300 bg-slate-100 px-2 py-1 rounded-lg">#${c.key.slice(-6)}</span>
-                                    <span class="px-2.5 py-1 rounded-lg text-[10px] font-bold ${o.status === 'Delivered' ? 'bg-emerald-100 text-emerald-700' : o.status === 'Shipped' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}">${o.status || 'Processing'}</span>
+                                    <span class="px-2.5 py-1 rounded-lg text-[10px] font-bold ${status === 'Delivered' ? 'bg-emerald-100 text-emerald-700' : status === 'Shipped' ? 'bg-blue-100 text-blue-700' : status === 'Cancelled' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}">${status}</span>
                                 </div>
 
-                                <!-- Product list -->
-                                <div class="flex flex-wrap gap-1.5 my-2">
-                                    ${items.length > 0 ? items.map(item => `
-                                        <span class="order-item-pill">
-                                            <i class="fa-solid ${item.icon || 'fa-pen'}"></i>
-                                            ${item.name} <span class="text-emerald-600 font-black">×${item.qty}</span>
+                                <!-- Timeline -->
+                                <div class="order-timeline my-3">
+                                    ${steps.map((s, idx) => `
+                                        <span class="timeline-step ${idx <= currentStep ? (idx === currentStep ? 'active' : 'done') : ''}">
+                                            ${idx <= currentStep ? (idx === currentStep ? '●' : '✓') : '○'} ${s}
                                         </span>
-                                    `).join('') : `<span class="text-xs text-slate-400 italic">No items</span>`}
+                                        ${idx < steps.length - 1 ? `<span class="timeline-line ${idx < currentStep ? 'done' : ''}"></span>` : ''}
+                                    `).join('')}
+                                </div>
+
+                                <div class="flex flex-wrap gap-1.5 my-2">
+                                    ${items.map(item => `
+                                        <span class="bg-slate-100 rounded-full px-2 py-0.5 text-[10px] font-semibold">
+                                            ${item.name} ×${item.qty}
+                                        </span>
+                                    `).join('')}
                                 </div>
 
                                 <div class="flex justify-between items-center mt-3 pt-3 border-t border-slate-100">
                                     <span class="text-sm font-black text-emerald-700">${total} BD</span>
-                                    <span class="text-[10px] text-slate-400">${o.date ? new Date(o.date).toLocaleDateString() : ''}</span>
+                                    <div class="flex items-center gap-2">
+                                        ${!isCancelled && status === 'Processing' ? `
+                                            <button onclick="cancelOrder('${c.key}')" class="text-red-500 text-xs font-bold underline">Cancel</button>
+                                        ` : ''}
+                                        <span class="text-[10px] text-slate-400">${o.date ? new Date(o.date).toLocaleDateString() : ''}</span>
+                                    </div>
                                 </div>
+                                ${o.address ? `
+                                    <div class="text-[10px] text-slate-400 mt-2 border-t pt-2">
+                                        📦 ${o.address.addressLine}, ${o.address.city}, ${o.address.postal}
+                                    </div>
+                                ` : ''}
                             </div>`;
                     }
                 });
 
-                container.innerHTML = found ? html : `<div class="bg-white p-10 rounded-3xl text-center text-slate-400 border border-emerald-50">You haven't placed any orders yet.</div>`;
+                container.innerHTML = found ? html : `<div class="bg-white p-10 rounded-3xl text-center text-slate-400">No orders yet.</div>`;
             });
         }
 
-        // --- AUTH ---
+        // ----- Auth views -----
         function renderAuth(type) {
             document.getElementById('main-content').innerHTML = `
                 <div class="max-w-sm mx-auto bg-white p-8 rounded-[40px] shadow-2xl mt-10">
                     <h2 class="text-2xl font-black text-center mb-6">${type === 'login' ? 'Welcome Back' : 'Create Account'}</h2>
                     <form id="auth-form" class="space-y-4">
-                        <input type="email" id="email" placeholder="Email" class="w-full bg-slate-50 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-emerald-300" required>
-                        <input type="password" id="pass" placeholder="Password" class="w-full bg-slate-50 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-emerald-300" required>
-                        <button type="submit" class="w-full m3-btn-green py-4 mt-2">Continue</button>
+                        <input type="email" id="email" placeholder="Email" class="w-full bg-slate-50 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-emerald-300" required />
+                        <input type="password" id="pass" placeholder="Password" class="w-full bg-slate-50 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-emerald-300" required />
+                        <button type="submit" class="w-full m3-btn-green py-4 mt-2">${type === 'login' ? 'Login' : 'Sign Up'}</button>
                     </form>
                     <p class="text-center mt-6 text-sm text-slate-400 cursor-pointer" onclick="showView('${type === 'login' ? 'signup' : 'login'}')">
                         ${type === 'login' ? 'New here? <span class="text-emerald-600 font-bold">Sign up</span>' : 'Have an account? <span class="text-emerald-600 font-bold">Login</span>'}
@@ -458,13 +841,15 @@
 
             document.getElementById('auth-form').onsubmit = async (e) => {
                 e.preventDefault();
-                const em = document.getElementById('email').value;
-                const pw = document.getElementById('pass').value;
+                const email = document.getElementById('email').value;
+                const pass = document.getElementById('pass').value;
                 try {
                     if (type === 'login') {
-                        await signInWithEmailAndPassword(auth, em, (em === ADMIN_EMAIL ? ADMIN_PASS_SECRET : pw));
+                        await auth.signInWithEmailAndPassword(email, (email === ADMIN_EMAIL ? ADMIN_PASS_SECRET : pass));
                     } else {
-                        await createUserWithEmailAndPassword(auth, em, pw);
+                        const cred = await auth.createUserWithEmailAndPassword(email, pass);
+                        await cred.user.sendEmailVerification();
+                        showMessage('Verification email sent! Please check your inbox.');
                     }
                 } catch (err) {
                     showMessage(err.message, 'error');
@@ -472,37 +857,8 @@
             };
         }
 
-        // --- AUTH STATE ---
-        onAuthStateChanged(auth, (u) => {
-            document.getElementById('loader').style.display = 'none';
-            document.getElementById('bottom-bar').classList.toggle('hidden', !u);
-            const nav = document.getElementById('nav-actions');
-
-            if (u) {
-                nav.innerHTML = `
-                    <button id="logout-btn" class="w-10 h-10 rounded-full bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 transition">
-                        <i class="fa-solid fa-power-off"></i>
-                    </button>`;
-                document.getElementById('logout-btn').onclick = () => signOut(auth);
-                document.getElementById('admin-icon').classList.toggle('hidden', u.email !== ADMIN_EMAIL);
-
-                // Clean up old orders listener on auth change
-                if (ordersListener) {
-                    ordersListener();
-                    ordersListener = null;
-                }
-
-                // Show default view
-                if (u.email === ADMIN_EMAIL) {
-                    showView('admin');
-                } else {
-                    showView('home');
-                }
-            } else {
-                nav.innerHTML = `<button onclick="showView('login')" class="m3-btn-green px-6 py-2 text-sm">Login</button>`;
-                showView('home');
-            }
-        });
+        // ----- Auto initial view -----
+        // This will be triggered by onAuthStateChanged
     </script>
 </body>
 </html>
